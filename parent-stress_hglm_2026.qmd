@@ -1,0 +1,565 @@
+---
+title: "Parenting Stress & Child Anxiety"
+author: "Stephanie Estrera"
+format: docx
+editor: visual
+---
+
+# Preregistration
+
+Link: <https://osf.io/xazj7>
+
+DOI: [https://doi.org/10.17605/OSF.IO/XAZJ7](https://doi.org/10.17605/OSF.IO/XAZJ7https://doi.org/10.17605/OSF.IO/XAZJ7)
+
+# Call in Data
+
+Calling in data from NatPAT 2023.
+
+```{r}
+library(here)
+set.seed(1989)
+
+covid2023 = read.csv(here("Data/NatPAT_COVID2023_DoubleEntered_Dec6th2024.csv"))
+```
+
+# 1. Prepare Data
+
+## 1.A. Variables
+
+### 1. A. I. Parenting Stress
+
+**Variable name** = covidparentingstress_0
+
+During the 2022-2023 school year, how stressful were your parenting experiences with your child? (1=Not at all, 5=Very much)
+
+### 1. A. II. Child Anxiety
+
+8 items assessing severity of anxiety symptoms (1=Never, 4 = Always). **Scored by computing sum scores** (higher scores=greater levels of anxiety)
+
+**Variable name** = anxiety_sum_0
+
+### 1. A. III. Parent Psychological Distress
+
+10 items assessing various domains of psychological distress (1=None of the time, 5 = All the time). **Scored by computing sum scores** (higher scores=greater levels of psychological distress in the parent)
+
+**Variable name** = Kessler_sum_0
+
+### 1. A. IV. Child Resilience
+
+6 items assessing child's ability to bounce back (1=Strongly disagree, 5 = Strongly agree). **Scored by computing sum scores** (higher scores=higher levels of resilience present in the child)
+
+- *Note from Steph:* We preregistered doing this as a sum score, but I noticed in the codebook that we actually used an average (brs_avg_0). I'm going to follow the preregistration.
+
+#### 1. A. IV. a. Creating Sum Score
+
+Following the coding from the NatPAT codebook for calculating the average score, but just changing the loop so it calculates the sum for scores that have less than 10% missing
+
+```{r}
+# Reverse coding items 2, 4, and 6
+covid2023$brs_child2_0_r <- 6 - covid2023$brs_child2_0
+covid2023$brs_child4_0_r <- 6 - covid2023$brs_child4_0
+covid2023$brs_child6_0_r <- 6 - covid2023$brs_child6_0
+
+# Percent missing per row
+BRS_Np <- rowSums(is.na(covid2023[, c("brs_child1_0", "brs_child2_0_r", "brs_child3_0", "brs_child4_0_r", "brs_child5_0", "brs_child6_0_r")])) / 6 * 100
+
+for(i in 1:nrow(covid2023)) {
+  if(BRS_Np[i] < 10) {
+    covid2023$brs_sum[i] <- rowSums(covid2023[i, c("brs_child1_0", "brs_child2_0_r", "brs_child3_0", "brs_child4_0_r", "brs_child5_0", "brs_child6_0_r")], na.rm = TRUE)
+  } else {
+    covid2023$brs_sum[i] <- NA
+  }
+}
+
+```
+
+**Variable name** = brs_sum_0
+
+## 1.B. Examine distributions of variables
+
+### 1. B. I. Subset data
+
+The code below subsets the data so it only has bg_id, famid, the measures described above (4).
+
+```{r}
+library(dplyr)
+dat0 = covid2023 %>%
+  select(bgid_0, famid,
+         covidparentingstress_0,
+         anxiety_sum_0,
+         Kessler_sum_0,
+         brs_sum)
+```
+
+### 1. B. II. Examine Distributions of Variables
+
+#### 1. B. II. a. Descriptive Statistics
+
+```{r}
+library(psych)
+dat0 = covid2023 %>%
+  select(bgid_0, famid,
+         covidparentingstress_0,
+         anxiety_sum_0,
+         Kessler_sum_0,
+         brs_sum)
+psych::describe(dat0)
+```
+
+- All Skew & Kurtosis within +- 2
+
+- Min & Max for the variables within expected range
+
+#### 1. B. II. b. Histograms
+
+```{r}
+#| warning: false
+#| message: false 
+#| error: false
+library(ggplot2)
+library(dplyr)
+sel_var = dat0 %>% select(covidparentingstress_0, anxiety_sum_0, Kessler_sum_0, brs_sum)
+
+var_long <- sel_var %>%
+  tidyr::pivot_longer(everything(), names_to = "Variable", values_to = "Value")
+
+ggplot(var_long, aes(x = Value)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "skyblue", color = "white") +
+  geom_density(color = "red", size = 1) +
+  facet_wrap(~ Variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Distributions of Measures",
+       x = "Score",
+       y = "Density")
+
+```
+
+#### 1. B. II. c. Boxplots
+
+```{r}
+#| warning: false
+#| message: false 
+#| error: false
+library(ggplot2)
+library(dplyr)
+
+sel_var = dat0 %>% select(covidparentingstress_0, anxiety_sum_0, Kessler_sum_0, brs_sum)
+
+# Histograms with density overlay
+var_long <- sel_var %>%
+  tidyr::pivot_longer(everything(), names_to = "Variable", values_to = "Value")
+
+ggplot(var_long, aes(x = Variable, y = Value, fill = Variable)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Boxplots of Measures",
+       x = "",
+       y = "Score") +
+  theme(legend.position = "none")
+```
+
+#### 1. B. II. c. i. Outliers
+
+**Bounds of Interquartile Fences**
+
+```{r}
+library(dplyr)
+library(tidyr)
+
+vars =c("covidparentingstress_0", "anxiety_sum_0", "Kessler_sum_0", "brs_sum")
+
+bounds = dat0 %>%
+  summarise(across(all_of(vars), list(
+    Q1    = ~quantile(., 0.25, na.rm = TRUE),
+    Q3    = ~quantile(., 0.75, na.rm = TRUE),
+    IQR   = ~IQR(., na.rm = TRUE)
+  ), .names = "{.col}_{.fn}")) %>%
+  pivot_longer(everything(),
+               names_to = c("Variable",".stat"),
+               names_pattern = "(.*)_(Q1|Q3|IQR)",
+               values_to = "val") %>%
+  pivot_wider(names_from = ".stat", values_from = "val") %>%
+  mutate(lower = Q1 - 1.5*IQR,
+         upper = Q3 + 1.5*IQR)
+
+print(bounds)
+```
+
+**Outlier count per var**
+
+Below are the num of outliers for each variable
+
+- parenting stress = 45 (high)
+
+- anxiety = 35 (high)
+
+- distress = 34 (high)
+
+- resilience = 20 (low)
+
+```{r}
+# Generative AI: The code below was generated using ChatGPT 5
+# APA Citation: OpenAI. (2025). ChatGPT (August 20 version)[Large language model]. https://chat.openai.com.
+library(tidyverse)
+outlier_counts <- map_dfr(vars, function(v){
+  b <- bounds %>% filter(Variable == v)
+  x <- dat0[[v]]
+  tibble(
+    Variable = v,
+    n_low  = sum(!is.na(x) & x <  b$lower),
+    n_high = sum(!is.na(x) & x >  b$upper),
+    n_out  = n_low + n_high
+  )
+})
+print(outlier_counts)
+```
+
+```{r}
+# Generative AI: The code below was generated using ChatGPT 5
+# APA Citation: OpenAI. (2025). ChatGPT (August 20 version)[Large language model]. https://chat.openai.com.
+
+winsorize_to_fence = function(x, vname){
+  b = bounds %>% filter(Variable == vname)
+  if (nrow(b) == 0) return(x)
+  pmin(pmax(x, b$lower), b$upper)
+}
+
+dat0 = dat0 %>%
+  mutate(across(all_of(vars),
+                ~ winsorize_to_fence(., cur_column()),
+                .names = "{.col}_w"))
+```
+
+**Descriptive for original data set**
+
+```{r}
+vars =c("covidparentingstress_0", "anxiety_sum_0", "Kessler_sum_0", "brs_sum")
+sel_var = dat0 %>% select(vars)
+psych::describe(sel_var)
+```
+
+**Descriptive for Windsorized data set**
+
+```{r}
+vars =c("covidparentingstress_0_w", "anxiety_sum_0_w", "Kessler_sum_0_w", "brs_sum_w")
+sel_var = dat0 %>% select(vars)
+psych::describe(sel_var)
+```
+
+### 1. B. II. d. QQ Plot
+
+```{r}
+#| warning: false
+#| message: false 
+#| error: false
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+vars =c("covidparentingstress_0_w", "anxiety_sum_0_w", "Kessler_sum_0_w", "brs_sum_w")
+dat_long = dat0 %>%
+  select(all_of(vars)) %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value")
+
+ggplot(dat_long, aes(sample = value)) +
+  stat_qq(color = "steelblue") +
+  stat_qq_line(color = "red") +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Q-Q Plots of Measures")
+
+```
+
+- kessler & anxiety sum curve away from the line at the ends
+
+- This shows some deviations from normality
+
+### 1. B. II. e. Shapiro-Wilks test
+
+```{r}
+vars =c("covidparentingstress_0_w", "anxiety_sum_0_w", "Kessler_sum_0_w", "brs_sum_w")
+
+shapiro_results = lapply(vars, function(v) {
+  test <- shapiro.test(dat0[[v]])
+  tibble(
+    Variable = v,
+    W = round(test$statistic, 3),
+    p_value = round(test$p.value, 4)
+  )
+}) %>% bind_rows()
+
+print(shapiro_results)
+```
+
+- p-values \<.05 - reject that the data is normal - however, i think this test is pretty sensitive to large sample sizes which is why it's useful to interpret it with boxplots/qqplots/looking at skewness & kurtosis
+
+- w - W closer to 1 is considered more normal.
+
+## 1. C. Check for Missing Data
+
+*"We will first check and report missingness rates at both the case level and variable level for each of our four main variables (i.e., parenting stress, child anxiety, parent psychological distress, and child resilience). We will conduct Little’s MCAR test to assess whether data may be missing completely at random (MCAR; Little, 1988). If the test is significant (p \< 0.05), likely indicating that the data are missing completely at random (MCAR), we’ll decide based on looking at the data to either proceed with mean imputation or regression imputation. If the test is non-significant (p \> 0.05), likely indicating that the data are missing at random (MAR), we will proceed with multiple imputation. If we believe any cases to be missing not at random (MNAR), we will conduct sensitivity analyses to evaluate the potential impact of these cases on key findings."*
+
+### 1. C. I. Variable-Level % Missing
+
+```{r}
+library(dplyr)
+library(tidyr)
+vars =c("covidparentingstress_0_w", "anxiety_sum_0_w", "Kessler_sum_0_w", "brs_sum_w")
+id_vars=c("bg_id", "famid")
+
+# Variable - Level Missing
+missing_by_var =  dat0 %>%
+  summarise(across(all_of(vars),~mean(is.na(.))*100, .names = "pctmiss_{col}")) %>%
+  pivot_longer(everything(), names_to = "var", values_to = "percent_missing")
+
+print(missing_by_var)
+```
+
+### 1. C. II. Case-level % missing
+
+```{r}
+library(dplyr)
+library(tidyr)
+vars =c("covidparentingstress_0_w", "anxiety_sum_0_w", "Kessler_sum_0_w", "brs_sum_w")
+id_vars=c("bgid_0", "famid")
+
+# Case-level % missing (for the four variables only)
+dat0 <- dat0 %>%
+  mutate(percent_missing_row = rowMeans(across(all_of(vars), ~ is.na(.))) * 100)
+
+summary(dat0$percent_missing_row)
+```
+
+- at least 75% of participants have complete data
+
+- on average, particiapnts are missing 4.9 % of their responses across the variables
+
+- there's at least one participant who is missing 80% of their data (3/4 of the variables)
+
+### 1. C. III. MCAR Test
+
+- *Note from Steph*: I might be wrong, but we should double check our preregistration because I think what we wrote down might be flipped for interpreting Little's MCAR (I can review this again later!) - basically i think *p*\>.05 means the data is missing completely at random (MCAR), while *p*\<=.05 means its not MCAR
+
+```{r}
+library(misty)
+vars = c("covidparentingstress_0_w", "anxiety_sum_0_w", "Kessler_sum_0_w","brs_sum_w")
+id_vars = c("bgid_0", "famid")
+dat_little = dat0[, vars]
+
+mod.little = na.test(dat_little, print = "little")
+print(mod.little)
+
+# Extract specific values for reporting
+chi2_stat = mod.little$result$little$statistic
+df = mod.little$result$little$df
+p_value = mod.little$result$little$p.value
+```
+
+```{r}
+
+# Commenting this out because r is NOT liking this when I render it but the output / interpretation is below
+library(MissMech) # function Little mcar - BaylorEdPsych no longer works for my version of R, but I think MissMech's function TestMCARNormality() works
+library(dplyr)
+library(mice)
+library(tidyr)
+vars =c("covidparentingstress_0_w", "anxiety_sum_0_w", "Kessler_sum_0_w", "brs_sum_w")
+id_vars=c("bgid_0", "famid")
+
+mcar_mod = MissMech::TestMCARNormality(dat0 %>% select(all_of(vars)))
+print(mcar_mod)
+```
+
+- Majority of the cases (group.2; 1010) have all variables
+
+- The parametric test (Hawkins - doesn't assume normality): less than .05; suggests we reject that the data is missing completely at random (MCAR) if we are assuming the data meets the criteria for normality (skewness&kurtosis are +- 2)
+
+- the non-parametric test is greater than .05, so this would suggest we fail to reject MCAR - just to note, we have summed scores for most of these variables. However, I would say based on our tests of normality (skew/kurtosis - vistually looking at the qq plot + the large sample size affecting the Shapiro-Wild test) we should go with the hawkins test
+
+### 1. C. III. a. Reject data is not MCAR (Treat as Missing at Rnadom)
+
+- Hawkins Test \<.05
+
+- Proceed with Multiple Imputation using MICE
+
+```{r}
+#| warning: false
+#| message: false 
+#| error: false
+#| output: false
+# Generative AI: The code below was generated using ChatGPT 5
+# APA Citation: OpenAI. (2025). ChatGPT (August 17 version)[Large language model]. https://chat.openai.com.
+
+library(mice)
+
+vars =c("covidparentingstress_0_w", "anxiety_sum_0_w", "Kessler_sum_0_w", "brs_sum_w")
+id_vars <- c("bgid_0", "famid")
+
+# Define imputation methods
+meth =make.method(dat0)
+meth[id_vars]= ""     # do not impute IDs
+meth[vars]="pmm"  # predictive mean matching
+
+# Predictor matrix (exclude IDs)
+pred = make.predictorMatrix(dat0)
+pred[id_vars, ] = 0
+pred[, id_vars]=0
+
+# Run multiple imputation (20 datasets, 20 iterations each)
+imp = mice(dat0, m = 20, maxit = 20, method = meth,
+            predictorMatrix = pred, seed = 1989)
+
+# Check imputation diagnostics
+print(imp)
+plot(imp)
+
+
+```
+
+## Correlations
+
+```{r}
+library(mice)
+library(miceadds)
+
+vars = c("covidparentingstress_0_w", "anxiety_sum_0_w", 
+          "Kessler_sum_0_w", "brs_sum_w")
+
+# Pooled pairwise Pearson correlations across all m imputations
+pooled_cor <- miceadds::micombine.cor(mi.res = imp, variables = vars, method = "pearson")
+
+# Reshape into matrix
+library(tidyr)
+library(dplyr)
+
+r_matrix <- pooled_cor %>%
+  select(variable1, variable2, r) %>%
+  pivot_wider(names_from = variable2, values_from = r)
+
+p_matrix <- pooled_cor %>%
+  select(variable1, variable2, p) %>%
+  pivot_wider(names_from = variable2, values_from = p)
+
+r_matrix
+p_matrix
+```
+
+## 1. D. Centering Predictors
+
+```{r}
+library(mice)
+library(lme4)
+library(lmerTest)
+library(dplyr)
+library(mitml)
+
+# Function to center variables
+center_variables = function(data) {
+  data %>%
+    # Group-mean centering for Level 1 predictors (within-family)
+    group_by(famid) %>%
+    mutate(
+      covidparentingstress_w_group_c = covidparentingstress_0_w - mean(covidparentingstress_0_w, na.rm = TRUE),
+      brs_sum_w_group_c = brs_sum_w - mean(brs_sum_w, na.rm = TRUE)
+    ) %>%
+    ungroup() %>%
+    # Grand-mean centering for Level 2 predictors (overall sample)
+    mutate(
+      covidparentingstress_w_grand_c = covidparentingstress_0_w - mean(covidparentingstress_0_w, na.rm = TRUE),
+      Kessler_sum_w_grand_c = Kessler_sum_0_w - mean(Kessler_sum_0_w, na.rm = TRUE)
+    )
+}
+
+
+# Apply centering to all 20 imputed datasets
+imp_centered_list <- lapply(1:20, function(i) {
+  complete(imp, i) %>% center_variables()
+})
+
+# Convert to mitml format (for proper pooling)
+imp_mitml <- as.mitml.list(imp_centered_list)
+```
+
+# 2. Testing the Unconditional Model
+
+```{r}
+#| warning: false
+#| message: false 
+#| error: false
+library(dplyr)
+library(lme4)
+library(lmerTest)
+
+mod.0 = with(imp_mitml, lmer(anxiety_sum_0_w ~ 1 + (1 | famid), REML = TRUE))
+
+# Pool results
+mod.0_pooled = testEstimates(mod.0, var.comp = TRUE)
+print(mod.0_pooled)
+```
+
+### 2. A. I. Intraclass Correlation
+
+```{r}
+5.838 / (5.838+8.477)
+```
+
+# 3. RQ 1.
+
+**Random intercepts model with parenting stress as a Level 1 predictor of child anxiety.**
+
+```{r}
+library(dplyr)
+library(lme4)
+library(lmerTest)
+
+mod.1 = with(imp_mitml, lmer(anxiety_sum_0_w ~ covidparentingstress_w_grand_c + (1 | famid), REML = TRUE, na.action = na.exclude))
+mod.1_pooled = testEstimates(mod.1, var.comp = TRUE)
+print(mod.1_pooled)
+```
+
+### 3. A. I. Intraclass Correlation
+
+```{r}
+5.19 / (5.19+8.33)
+```
+
+# 4. RQ 2
+
+A cross-level interaction model, where parenting stress (Level 1), parent psychological distress (Level 2) and their interaction predict child anxiety. Parenting stress will be group-mean centered and psychological distress will be grand-mean centered to ensure that Level 2 effects are interpreted as deviations from the overall mean.
+
+*Johnson-Neyman technique for probing interactions:* For significant interactions, we will also conduct a Johnson-Neyman technique to probe the interaction by identifying the specific ranges of parent distress (RQ 2) and resilience (RQ 3) at which parenting stress is a significant predictor of child anxiety. We will use the johnson_neyman() function from the R package “interactions”. (Bauer & Curran, 2005)
+
+```{r}
+library(dplyr)
+library(lme4)
+library(lmerTest)
+#library(interactions) # didn't need for this since interaction not sig
+
+mod.2 =with(imp_mitml, lmer(anxiety_sum_0_w ~ covidparentingstress_w_group_c * Kessler_sum_w_grand_c + (1 | famid),REML = TRUE, na.action = na.exclude))
+mod.2_pooled = testEstimates(mod.2, var.comp = TRUE)
+print(mod.2_pooled)
+```
+
+### 4. A. I. Intraclass Correlation
+
+```{r}
+4.869 / (4.869 + 8.343)
+```
+
+# 5. RQ 3
+
+**We will use a Level 1 moderation model in which parenting stress (Level 1), child resilience (Level 1), and the interaction effect will be used to predict child anxiety. Group-mean centering will be used.**
+
+```{r}
+mod.3 =with(imp_mitml, lmer(anxiety_sum_0_w ~ covidparentingstress_w_group_c * brs_sum_w_group_c + (1 | famid)))
+mod.3_pooled = testEstimates(mod.3, var.comp = TRUE)
+print(mod.3_pooled)
+```
+
+### 5. A. I. Intraclass Correlation
+
+```{r}
+6.680 / (6.680 + 6.744)
+```
+
+```{r}
+sessionInfo()
+```
